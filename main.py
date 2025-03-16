@@ -41,6 +41,8 @@ def get_data(N=100, sigma=1):
         transformed_img += np.random.randn(*transformed_img.shape) * sigma
         
         images[i] = transformed_img
+
+
         # plt.imshow(transformed_img, cmap='gray')
         # plt.axis('off')
         # plt.show()
@@ -50,8 +52,8 @@ def get_data(N=100, sigma=1):
 
 if __name__ == "__main__":
     
-    images = get_data(N=10, sigma=10)
-    em = EM(img_shape=images[0].shape, rotation_res=1, scale_res=0.2)
+    images = get_data(N=10, sigma=5)
+    em = EM(img_shape=images[0].shape, rotation_res=5, scale_res=0.1, max_iter=10)
     img, sigma = em.recover_img(images)
     
     print(f"Done. Sigma = {sigma}")
