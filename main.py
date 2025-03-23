@@ -36,7 +36,7 @@ def get_data(N=100, sigma=1):
 
         # Apply the affine transformation
         transformed_img = cv2.warpAffine(
-            img, M, (w, h), flags=cv2.INTER_CUBIC).astype(np.float32)
+            img, M, (w, h), flags=cv2.INTER_NEAREST).astype(np.float32)
 
         # add noise
         transformed_img += np.random.randn(*transformed_img.shape) * sigma
@@ -52,18 +52,17 @@ def get_data(N=100, sigma=1):
 
 if __name__ == "__main__":
 
-    images = get_data(N=50, sigma=20)
+    images = get_data(N=100, sigma=50)
     em = EM(img_shape=images[0].shape,
-            rotation_res=5,
+            rotation_res=10,
             scale_res=0.1,
             trans_res=6,
             max_iter=5)
 
     t0 = time()
-    img, sigma = em.recover_img(images)
+    img = em.recover_img(images)
 
     t1 = time()
-    print(f"Done. Sigma = {sigma}")
     print(f"runtime = {(t1 - t0) / 60} min")
     plt.imshow(img, cmap='gray')
     plt.axis('off')
