@@ -1,91 +1,110 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import concurrent.futures
+
 
 class EM():
 
-    def __init__(self, img_shape, rotation_res=5, scale_res=0.1, max_iter=10):
+    def __init__(self, img_shape, rotation_res=5, scale_res=0.1, trans_res=1, max_iter=10):
         self.J = img_shape[0] * img_shape[1]
-        self.translations_sigma = 0.05 * img_shape[0] * img_shape[1]
+        self.translations_sigma = 0.05 * img_shape[0]
         self.rotation_res = rotation_res
-        self.scale_res = scale_res
-        self.rots = np.arange(0, 360, rotation_res)
-        n_scales = int(2 // scale_res)
-        self.scales = np.linspace(0.5, 1.5, n_scales)
+        scale_res = scale_res
+        rots = np.arange(0, 360, rotation_res)
+        n_scales = int(1 // scale_res)
+        scales = np.linspace(0.5, 1.5, n_scales)
+        n_trans = int(2 * 0.05 * img_shape[0] // trans_res)
+        translations = np.linspace(-int(0.05 * img_shape[0]), int(0.05 * img_shape[0]), n_trans).astype(np.int32)
+        # translations = np.array([1])
+        self.phis = np.zeros(
+            [rots.size*scales.size*translations.size*translations.size, 2, 3])
+        self.lpriors = np.zeros(
+            [rots.size*scales.size*translations.size*translations.size])
+        c = 0
+        for j, r in enumerate(rots):
+            for k, s in enumerate(scales):
+                for l, t_x in enumerate(translations):
+                    for m, t_y in enumerate(translations):
+                        self.lpriors[c] = self.lprior(rot=r, scale=s, t_x=t_x, t_y=t_y)
+                        self.phis[c] = cv2.getRotationMatrix2D(center=(img_shape[1]/2,
+                                                                    img_shape[0]/2),
+                                                            angle=r,
+                                                            scale=s)
+                        self.phis[c][0, 2] += t_x
+                        self.phis[c][1, 2] += t_y
+                        c += 1
+
+        print(f'model is ready. table size = {self.phis.shape}')
+
         self.img_shape = img_shape
         self.max_iter = max_iter
-        # self.n_trans_params = self.rots.size * self.scales.size
-        # self.params = np.zeros([n_trans_params, 2])
-        # for i in range(self.n_trans_params):
-        #     self.params[i, 0] = 
 
-    def prior(self, rot, scale, t_x, t_y):
-        p = np.exp(-1 * ((t_x ** 2) + (t_y ** 2)) / (2 * self.translations_sigma ** 2))
-        assert p == 1
-        return p
+    def lprior(self, rot, scale, t_x, t_y):
+        lp =  -1 * ((t_x ** 2) + (t_y ** 2)) / (2 * self.translations_sigma ** 2) + np.log(scale) + 4*np.log(1 - (scale/5)) + np.log(6/5) 
+        return lp
 
-    def get_phi_mat(self, rot, scale, t_x=None, t_y=None):
-        return cv2.getRotationMatrix2D(center=(self.img_shape[1]/2, self.img_shape[0]/2),
-                                       angle=rot, scale=scale)
-
-
-    def ll(self, X, phi, A, sigma):
-        phiX = cv2.warpAffine(X, phi, self.img_shape[::-1], flags=cv2.INTER_LINEAR).astype(np.float64)
-        # plt.imshow(X-phiA, cmap='gray')
-        # plt.axis('off')
-        # plt.show()
-        # return np.exp(np.dot(phiX,A).sum() / (sigma**2))
-        # cross_val = np.sum(phiX*A)
-        # # weight is exponential of cross-correlation / sigma^2
-        # return  np.exp(cross_val / (sigma**2))
+    def ll(self, phiX, A, sigma):
         return -1 * np.sum((A-phiX)**2) / (2*(sigma**2))
 
+    def calc_img_ll_table(self, i):
+        new_A = np.zeros_like(self.A)
+        sigma_sqr = 0
+        self.phiXs = np.zeros((self.phis.shape[0], self.img_shape[0], self.img_shape[1]))
+
+        def single_phi(j):
+            self.phiXs[j] = cv2.warpAffine(self.images[i], self.phis[j], self.img_shape[::-1], flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
+            self.lls[i, j] = self.ll(phiX=self.phiXs[j], A=self.A, sigma=self.sigma) + self.lpriors[j]
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+                list(executor.map(single_phi, list(range(self.phis.shape[0]))))
+
+
+
+        max_ll = np.max(self.lls[i])
+        log_denom = np.log(np.sum(np.exp(self.lls[i] - max_ll))) + max_ll
+        denom = np.exp(log_denom)
+        self.ws[i] = np.exp(self.lls[i] - log_denom)
+        for j in range(self.phis.shape[0]):
+            new_A += (1 / self.images.shape[0]) * self.ws[i, j] * self.phiXs[j]
+            sigma_sqr += (1 / (self.images.shape[0]*self.J)) * \
+                self.ws[i, j] * np.sum((self.A-self.phiXs[j])**2)
+        return new_A, sigma_sqr
+
     def recover_img(self, images):
-        # images = images / 256
         images = images / 1000
+        self.images = images
 
         # initialize parameters
-        sigma = 0.1
-        A = images[0]
-        # A = np.mean(images, axis=0)
+        self.sigma = 0.01
+        self.A = images[0]
+        # self.A = np.mean(images, axis=0)
 
-        ws = np.zeros((images.shape[0], self.rots.size, self.scales.size))
-        lls = np.zeros((images.shape[0], self.rots.size, self.scales.size))
+        self.ws = np.zeros((images.shape[0], self.phis.shape[0]))
+        self.lls = np.zeros((images.shape[0], self.phis.shape[0]))
         for iteration in range(self.max_iter):
-            print(f'iter {iteration}')
-            # E step
-            for i, X_i in enumerate(images):
-                for j, r in enumerate(self.rots):
-                    for k, s in enumerate(self.scales):
-                        phi_mat = self.get_phi_mat(rot=r, scale=s, t_x=None, t_y=None)
-                        lls[i, j, k]  = self.ll(X=X_i, phi=phi_mat, A=A, sigma=sigma) * self.prior(rot=r, scale=s, t_x=0, t_y=0)
-
-            for i, X_i in enumerate(images):
-                max_ll = np.max(lls[i])
-                # log_denom = np.log(np.sum(np.exp(lls[i])))
-                log_denom = np.log(np.sum(np.exp(lls[i] - max_ll))) + max_ll
-                denom = np.exp(log_denom)
-                # print(f'denom = {denom}')
-                ws[i] = np.exp(lls[i] - log_denom)
-
-            print(np.sum(ws, axis=(1, 2)))
-            # M step
-            new_A = np.zeros_like(A)
+            print(f'Iter {iteration}')
+            
+            new_A = np.zeros_like(self.A)
             sigma_sqr = 0
-            for i, X_i in enumerate(images):
-                for j, r in enumerate(self.rots):
-                    for k, s in enumerate(self.scales):
-                        phi = self.get_phi_mat(rot=r, scale=s)
-                        phiXi = cv2.warpAffine(X_i, phi, self.img_shape[::-1], flags=cv2.INTER_LINEAR).astype(np.float64)
-                        new_A += (1 / images.shape[0]) * ws[i, j, k] * phiXi
-                        sigma_sqr += (1 / (images.shape[0]*self.J)) * ws[i, j, k] * np.sum((A-phiXi)**2)
+            for i, X_i in enumerate(self.images):
+                res = self.calc_img_ll_table(i)
+                new_A += res[0]
+                sigma_sqr += res[1] 
 
-            sigma = np.sqrt(sigma_sqr)
-            print(A.mean(), new_A.mean())
-            A = new_A
-            print(f'Sigma = {sigma}')
-            # plt.imshow(A, cmap='gray')
+            self.sigma = np.sqrt(sigma_sqr)
+            print("mean diff")
+            print(np.mean(np.abs(self.A-new_A))* 1000)
+            print("max diff")
+            max_change = np.max(np.abs(self.A-new_A))* 1000
+            print(max_change)
+            if max_change < 3:
+                return new_A * 1000, self.sigma * 1000
+
+            self.A = new_A
+            print(f'Sigma = {self.sigma* 1000}')
+            # plt.imshow(self.A, cmap='gray')
             # plt.axis('off')
             # plt.show()
-        
-        return A * 1000, sigma * 1000
+
+        return self.A * 1000, self.sigma * 1000
