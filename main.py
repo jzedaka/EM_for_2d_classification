@@ -1,10 +1,9 @@
 import numpy as np
-import random
+
 import cv2
 import matplotlib.pyplot as plt
-
-from scipy.datasets import face
 from em import EM
+from time import time
 
 
 def get_data(N=100, sigma=1):
@@ -23,40 +22,49 @@ def get_data(N=100, sigma=1):
 
     images = np.zeros((N, h, w))
     for i in range(N):
-        angle = random.uniform(0, 360)
-        scale = random.uniform(0.5, 1.5)
+        angle = np.random.uniform(0, 360)
+        scale = np.random.uniform(0.5, 1.5)
         # scale = 1
-        tx = random.randint(-50, 50)
-        ty = random.randint(-50, 50)
-        M = cv2.getRotationMatrix2D(center=(w/2, h/2), angle=angle, scale=scale)
+        tx = np.random.randn() * 0.05 * h
+        ty = np.random.randn() * 0.05 * h
+        M = cv2.getRotationMatrix2D(
+            center=(w/2, h/2), angle=angle, scale=scale)
 
         # The translation component is stored in M[0,2] and M[1,2]
-        # M[0,2] += tx
-        # M[1,2] += ty
+        M[0, 2] += tx
+        M[1, 2] += ty
 
         # Apply the affine transformation
-        transformed_img = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR).astype(np.float64)
-        
+        transformed_img = cv2.warpAffine(
+            img, M, (w, h), flags=cv2.INTER_CUBIC).astype(np.float32)
+
         # add noise
         transformed_img += np.random.randn(*transformed_img.shape) * sigma
-        
-        images[i] = transformed_img
 
+        images[i] = transformed_img
 
         # plt.imshow(transformed_img, cmap='gray')
         # plt.axis('off')
         # plt.show()
-    
+
     return images
 
 
 if __name__ == "__main__":
-    
-    images = get_data(N=10, sigma=5)
-    em = EM(img_shape=images[0].shape, rotation_res=5, scale_res=0.1, max_iter=10)
+
+    images = get_data(N=50, sigma=20)
+    em = EM(img_shape=images[0].shape,
+            rotation_res=5,
+            scale_res=0.1,
+            trans_res=6,
+            max_iter=5)
+
+    t0 = time()
     img, sigma = em.recover_img(images)
-    
+
+    t1 = time()
     print(f"Done. Sigma = {sigma}")
+    print(f"runtime = {(t1 - t0) / 60} min")
     plt.imshow(img, cmap='gray')
     plt.axis('off')
     plt.show()
