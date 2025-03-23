@@ -47,19 +47,19 @@ class EM():
     def ll(self, phiX, A, sigma):
         return -1 * np.sum((A-phiX)**2) / (2*(sigma**2))
 
-    def calc_img_ll_table(self, i):
+    def single_img(self, i):
         new_A = np.zeros_like(self.A)
         sigma_sqr = 0
-        self.phiXs = np.zeros((self.phis.shape[0], self.img_shape[0], self.img_shape[1]))
+        self.phiXs = np.zeros((self.phis.shape[0], self.img_shape[0], self.img_shape[1]), dtype=np.float16)
 
         def single_phi(j):
-            self.phiXs[j] = cv2.warpAffine(self.images[i], self.phis[j], self.img_shape[::-1], flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
+            self.phiXs[j] = cv2.warpAffine(self.images[i], self.phis[j], self.img_shape[::-1],
+                                           flags=cv2.INTER_NEAREST,
+                                           borderMode=cv2.BORDER_REPLICATE).astype(np.float16)
             self.lls[i, j] = self.ll(phiX=self.phiXs[j], A=self.A, sigma=self.sigma) + self.lpriors[j]
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
                 list(executor.map(single_phi, list(range(self.phis.shape[0]))))
-
-
 
         max_ll = np.max(self.lls[i])
         log_denom = np.log(np.sum(np.exp(self.lls[i] - max_ll))) + max_ll
@@ -69,14 +69,14 @@ class EM():
             new_A += (1 / self.images.shape[0]) * self.ws[i, j] * self.phiXs[j]
             sigma_sqr += (1 / (self.images.shape[0]*self.J)) * \
                 self.ws[i, j] * np.sum((self.A-self.phiXs[j])**2)
+
         return new_A, sigma_sqr
 
     def recover_img(self, images):
-        images = images / 1000
         self.images = images
 
         # initialize parameters
-        self.sigma = 0.01
+        self.sigma = 20
         self.A = images[0]
         # self.A = np.mean(images, axis=0)
 
@@ -88,23 +88,22 @@ class EM():
             new_A = np.zeros_like(self.A)
             sigma_sqr = 0
             for i, X_i in enumerate(self.images):
-                res = self.calc_img_ll_table(i)
+                res = self.single_img(i)
                 new_A += res[0]
                 sigma_sqr += res[1] 
 
             self.sigma = np.sqrt(sigma_sqr)
-            print("mean diff")
-            print(np.mean(np.abs(self.A-new_A))* 1000)
+
             print("max diff")
-            max_change = np.max(np.abs(self.A-new_A))* 1000
+            max_change = np.max(np.abs(self.A-new_A))
             print(max_change)
-            if max_change < 3:
-                return new_A * 1000, self.sigma * 1000
+            if max_change < 20:
+                return new_A
 
             self.A = new_A
-            print(f'Sigma = {self.sigma* 1000}')
+            print(f'Sigma = {self.sigma* 1}')
             # plt.imshow(self.A, cmap='gray')
             # plt.axis('off')
             # plt.show()
 
-        return self.A * 1000, self.sigma * 1000
+        return self.A
