@@ -8,6 +8,9 @@ from time import time
 
 
 def get_data(N=100, sigma=1, save=False, translations=True):
+    """
+    Generates syntetic data - an 64xy4 filled circle with added noise and random affine transformations
+    """
 
     # image_path = r"C:\Users\jonathanz\Desktop\pin.png"
     # image_rgb = cv2.imread(image_path)
