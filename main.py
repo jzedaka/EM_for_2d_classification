@@ -71,6 +71,8 @@ if __name__ == "__main__":
     # Parse the command line inputs
     parser = argparse.ArgumentParser(description='EM arguments parser.')
     parser.add_argument('--mrc_stack_path', type=str, required=False, help='--mrc_stack_path <path to images>')
+    parser.add_argument('--output_path', type=str, required=False, help='--output_path <where to save the output>')
+
     sys_args, unknown = parser.parse_known_args()
 
     if sys_args.mrc_stack_path is not None:
@@ -78,13 +80,13 @@ if __name__ == "__main__":
         with mrcfile.open(sys_args.mrc_stack_path, permissive=True) as mrc:
             images = mrc.data
     else:
-        images, img = get_data(N=100, sigma=0.05)
+        images, img = get_data(N=100, sigma=0.1)
 
     em = EM(img_shape=images[0].shape,
             rotation_res=5,
             scale_res=0.2,
             trans_res=3,
-            max_iter=10,
+            max_iter=15,
             verbose=True)
 
     t0 = time()
@@ -92,6 +94,8 @@ if __name__ == "__main__":
 
     t1 = time()
     print(f"runtime = {(t1 - t0) / 60} min")
+    print("saving output ... ")
+    np.save(sys_args.output_path, rec_img)
     plt.imshow(rec_img, cmap='gray')
     plt.axis('off')
     plt.show()
